@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+      - name: Build
+        run: cmake --build build --config ${{ matrix.config }}
+      - name: Test
+        run: ctest --test-dir build -C ${{ matrix.config }} --output-on-failure
+      - name: Install smoke
+        run: cmake --install build --config ${{ matrix.config }} --prefix out/fiui-${{ matrix.config }}
+      - name: Package smoke
+        run: |
+          cmake -S tests/package_smoke -B build/package-smoke-${{ matrix.config }} -G "Visual Studio 17 2022" -A x64 -Dfiui_DIR="${{ github.workspace }}/out/fiui-${{ matrix.config }}/lib/cmake/fiui"
+          cmake --build build/package-smoke-${{ matrix.config }} --config ${{ matrix.config }}
+          ctest --test-dir build/package-smoke-${{ matrix.config }} -C ${{ matrix.config }} --output-on-failure

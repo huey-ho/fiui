@@ -1,0 +1,10 @@
+build/
+build-*/
+fiui-diagnostics/
+fiui-test-diagnostics/
+out/
+tmp_*.cpp
+fiui-test-*.bmp
+*.user
+*.suo
+*.vcxproj.user

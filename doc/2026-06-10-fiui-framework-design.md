@@ -2,6 +2,8 @@
 
 Date: 2026-06-10
 
+> Status: Historical context. Future architecture and implementation work should use `doc/2026-06-11-fiui-v0-runtime-architecture.md` and `doc/2026-06-11-fiui-v0-implementation-plan.md` as the authoritative references.
+
 ## Summary
 
 `fiui` is a modern Windows UI framework for C++ applications. Its first version targets Windows 10/11 x64 with MSVC, ships as a small native DLL, uses a simple declarative C++ API, renders through D3D11 and DirectWrite, and includes built-in modern visual styles that are suitable for AI-generated desktop tools.
@@ -10,6 +12,22 @@ The framework has two first-class goals:
 
 - AI can generate useful, good-looking desktop tool interfaces with minimal code.
 - AI can debug failures from structured diagnostics instead of guessing from noisy logs.
+
+## v0 Architecture Baseline
+
+`fiui v0` is a retained-mode UI runtime baseline, not a complete widget ecosystem. Its first implementation must lock the data model for high performance, dirty tracking, diagnostics, and theming before large widget coverage is added.
+
+Core v0 decisions:
+
+- Public widgets are value handles. `fiui::Button`, `fiui::Column`, and related classes behave like small value objects, but internally point to framework-owned intrusive reference-counted implementations.
+- Public APIs must not expose `std::shared_ptr` or make ABI stability depend on STL ownership types crossing the DLL boundary.
+- Every widget implementation owns a stable `object_id`, `generation`, `debug_id`, fallback path, lifecycle state, and dirty metadata.
+- Widget copies are shallow handle copies. Destruction decrements the internal reference count.
+- `add(child)` attaches the child implementation to a parent. The same implementation cannot be attached to multiple parents at the same time; duplicate attach is a diagnostics error.
+- Dirty tracking is mandatory from day 1. Every widget, layout node, and render node must carry bounds, paint bounds, clip bounds, dirty reason, and last mutation frame.
+- v0 may conservatively fall back to full repaint for complex cases, but it must still report original dirty sources, merged rectangles, fallback reason, and frame cost.
+- Diagnostics are a core subsystem, not optional logging. API mutations, attach/detach, layout invalidation, paint invalidation, event dispatch, resource creation/release, and frame reports must emit structured events.
+- Themes use a composition-oriented model: tokens, component variants, state styles, and widget composition. v0 does not implement selector/cascade styling.
 
 ## Product Positioning
 
@@ -26,8 +44,10 @@ The first version does not target:
 - WebView or Chromium-based rendering.
 - Windows 7/8 compatibility.
 - A full game engine or 3D editor.
-- A complete Qt/WPF-scale widget ecosystem.
+- A complete large-framework-scale widget ecosystem.
 - A first-release focus on full media zero-copy pipelines.
+- CSS selector/cascade styling.
+- A complete visual designer.
 
 ## Success Criteria
 
@@ -69,6 +89,7 @@ Win32 Window / Input / DPI / IME
 
 - Object IDs and object lifetime state.
 - Handles and validation.
+- Intrusive reference-counted widget implementations behind public value handles.
 - Error categories and result types.
 - Strings, time, thread identity, and small utility containers where needed.
 - Debug metadata for object creation, attachment, detachment, and destruction.
@@ -216,6 +237,9 @@ API rules:
 - Generate a stable fallback path when no debug ID is provided.
 - Report errors by widget path, such as `main_window/settings_root/run_button`.
 - Allow controls to be created, named, configured, and then added to a parent.
+- Public widget values are shallow handles; copying a widget preserves the same internal object identity.
+- A widget implementation may only have one parent. Re-attaching an already attached widget is rejected and logged.
+- The first public callback shape should avoid exposing large STL-heavy ownership types across the DLL boundary.
 
 ## Rendering Pipeline
 
@@ -260,6 +284,7 @@ State Change / Input / Timer
 Rules:
 
 - Every widget and render node tracks `bounds`, `paint_bounds`, and `clip_bounds`.
+- Every widget and render node tracks `dirty_reason` and `last_mutation_frame`.
 - Visual-only changes should repaint only the affected control region.
 - Text, size, or layout changes trigger layout invalidation and may expand to affected ancestors.
 - Shadows, blur, antialiasing, and rounded corners expand dirty paint bounds.
@@ -267,6 +292,7 @@ Rules:
 - Multiple dirty rectangles are merged per frame.
 - When rect count or total area exceeds thresholds, the frame may fall back to full repaint.
 - Debug mode records dirty sources, original rects, merged rects, fallback decisions, and repaint cost.
+- v0 correctness wins over partial repaint aggressiveness. Complex cases may full repaint when the frame report explains why.
 
 ## Diagnostics Design
 
@@ -361,22 +387,13 @@ MVP widgets:
 - `Text`
 - `Button`
 - `Input`
-- `TextArea`
-- `Checkbox`
-- `Radio`
-- `Select`
-- `Slider`
 - `Progress`
 - `Image`
-- `List`
 - `ScrollView`
-- `Dialog`
-- `Tabs`
-- `Toolbar`
 - `Separator`
 - `Spacer`
 
-`List` should support virtualization in the first version because AI-generated tools commonly display large collections.
+Deferred widgets include `TextArea`, `Checkbox`, `Radio`, `Select`, `Slider`, virtualized `List`, `Dialog`, `Tabs`, and `Toolbar`. They should be built after the value-handle lifecycle model, dirty tracking, diagnostics, theme tokens, and frame reporting are stable.
 
 MVP layout primitives:
 
@@ -393,12 +410,16 @@ MVP layout primitives:
 
 ## Built-In Visual Styles
 
-The first version should ship with four themes:
+The first version should ship with two baseline themes:
 
 - `modern.light`: default light desktop tool style.
 - `modern.dark`: default dark desktop tool style.
+
+Later themes should be implemented as token sets and component variants:
+
 - `compact.light`: dense admin and parameter-panel style.
 - `media.dark`: image, video, and monitoring style.
+- More modern visual styles based on token and composition presets.
 
 Style direction:
 
@@ -513,7 +534,7 @@ fiui/
 
 - Implement the core widget tree.
 - Implement row, column, padding, align, and scroll layout.
-- Implement first controls: window, text, button, input, image, progress, dialog.
+- Implement first controls: window, text, button, input, image, progress, separator, and spacer.
 - Add basic event callbacks.
 
 ### M4: Style and Themes
